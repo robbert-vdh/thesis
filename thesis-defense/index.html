@@ -1,0 +1,1816 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>Annotating Deeply Embedded Languages</title>
+
+    <link rel="stylesheet" href="dist/reset.css">
+    <link rel="stylesheet" href="dist/reveal.css">
+    <link rel="stylesheet" href="dist/theme/black.css">
+
+    <!-- Theme used for syntax highlighted code -->
+    <!-- <link rel="stylesheet" href="plugin/highlight/monokai.css"> -->
+    <link rel="stylesheet" href="monokai-sublime.css">
+
+    <style>
+        .reveal pre code {
+            /* Default is 400px */
+            max-height: 500px;
+        }
+
+        .no-numbers .hljs-ln-numbers {
+            /* Line numbers are needed for highlighting and automatic animations */
+            display: none;
+        }
+
+    </style>
+</head>
+
+<!-- TODO: Mention glossing over implicit parameter details at some point -->
+
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <section>
+                <h1 class="r-fit-text">Annotating Deeply Embedded Languages</h1>
+                <small style="font-size: 0.8em;">Robbert van der Helm</small>
+
+                <aside class="notes">
+                    <ul>
+                        <li>Adding more information to a deeply embedded
+                            language by annotating abstract syntax trees</li>
+                        <li>Try to cut as many parts as possible, so interrupt if not clear</li>
+                        <li>Excuse for amount of code, don't need to read it, mostly serves as a visual guide</li>
+                    </ul>
+                </aside>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Embedded languages</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>What are embedded languages</li>
+                            <li>Host language</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Language written inside of another language</li>
+                        <li>That other language is called the <em>host language</em></li>
+                        <li>May be domain specific</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>Different kinds of embeddings</h3>
+
+                    <ul>
+                        <li>Shallow embeddings</li>
+                        <li>Deep embeddings</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Shallow evaluates embedded program to value</li>
+                            <li>Deep evaluates embedded program to AST</li>
+                            <li>AST can be type checked, optimized, compiled</li>
+                            <li>Will be the focus</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Advantages</h3>
+
+                    <ul>
+                        <li>Integrates with the host language</li>
+                        <li>No separate parsing step</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Over regular parsed languages</li>
+                            <li>Integrate with host language programs</li>
+                            <li>Reuse tooling</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Disadvantages</h3>
+
+                    <ul>
+                        <li>No separate parsing step</li>
+                        <li class="fragment">Deep embeddings lack context information</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>No problem for shallow embeddings</li>
+                            <li>Deep embeddings lose information</li>
+                            <li>This is what we want to solve</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <h2>Objectives</h2>
+
+                <ul>
+                    <li>Recover context in deeply embedded programs</li>
+                    <li>Annotate the embedded program with that information</li>
+                    <li>Find other uses for the annotation system</li>
+                </ul>
+
+                <aside class="notes">
+                    <ul>
+                        <li>Goals of this thesis are</li>
+                        <li>Other uses are instructions for the compiler</li>
+                    </ul>
+                </aside>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Background</h2>
+                    <h4 style="margin-top: -0.5em">Implicit Parameters</h4>
+                </section>
+
+                <section>
+                    <h3>Explicit parameters</h3>
+
+                    <!-- Maybe streamline, skip through -->
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+addConstant :: Int -> Int -> Int
+addConstant constant n = n + constant
+
+addFour :: Int -> Int
+addFour n = addConstant 4 n
+                    </script></code></pre>
+
+                    <ul>
+                        <li>Works great in simple cases</li>
+                        <li>Adds boilerplate passing arguments around when calling lots of other functions</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Usual way to pass data around</li>
+                            <li>If addConstant was recursive or called other functions needing the constant then
+                                boilerplate</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Reader monad</h3>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+addConstant :: Int -> Reader Int Int
+addConstant n = do
+  constant <- ask
+  return (n + constant)
+
+addFour :: Int -> Int
+addFour n = runReader (addConstant n) 4
+                    </script></code></pre>
+
+                    <ul>
+                        <li>Avoids explicitly passing the argument around</li>
+                        <li>Boilerplate moved from passing the argument around to accessing the argument</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li></li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Implicit parameters</h3>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+addConstant :: (?constant :: Int) => Int -> Int
+addConstant n = n + ?constant
+
+addFour :: Int -> Int
+addFour n = let ?constant = 4 in addConstant n
+                    </script></code></pre>
+
+                    <ul>
+                        <li>Parameter is <em>implicitly</em> passed around</li>
+                        <li>All the benefits of the reader monad with almost no boilerplate</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Why is this useful</li>
+                            <li>Imagine a recursive function instead of addConstant</li>
+                            <li>Boilerplate</li>
+                            <li>Trees</li>
+                            <li>Important to understand main technique to come</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Background</h2>
+                    <h4 style="margin-top: -0.5em">Call stacks</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Discuss how function calls are represented</li>
+                            <li>And how to use this to our advantage</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>GHC Call Stacks</li>
+                        <li>RTS Execution Stacks</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Two different models</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>GHC Call Stacks</h3>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+printError :: HasCallStack => String -> IO ()
+printError msg = putStrLn msg >> print callStack
+                    </script></code></pre>
+
+                    &hellip;desugars to&hellip;
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+printError :: (?callStack :: CallStack) => String -> IO ()
+printError msg = putStrLn msg >> print ?callStack
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Needs HasCallStack annotation</li>
+                            <li>Uses special implicit parameter</li>
+                            <li>No need to set manually, compiler does it on call</li>
+                            <li>Parent functions with HasCallStack also show up in stack</li>
+                            <li>Anything beyond that is lost</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>RTS Execution Stacks</h3>
+
+                    <ul>
+                        <li>Runtime backtraces</li>
+                        <li>Does not require code changes like HasCallStack</li>
+                        <li>Sadly, not usable in its current state</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Uses debug symbols embedded in the program</li>
+                            <li>Doesn't require changes to code</li>
+                            <li>Sometimes you can't change code</li>
+                            <li>In theory, would work anywhere</li>
+                            <li>Doesn't work</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Background</h2>
+                    <h4 style="margin-top: -0.5em">A deeply embedded language</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Before extending language with annotations, you first need a language</li>
+                            <li>I'll go over the concepts, but skip most of the example language</li>
+                            <li>Ideas are more important than the actual implementation</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>The idea</h2>
+
+                    <ul>
+                        <li>The language describes an abstract syntax</li>
+                        <li>The abstract syntax is represented by a tree structure</li>
+                        <li>Smart constructors construct this tree</li>
+                    </ul>
+                </section>
+
+                <section data-auto-animate>
+                    <!-- <h2>The idea</h2> -->
+
+                    <pre data-id="canonical-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a) => a -> a
+factorial n | n <= 1    = 1
+            | otherwise = n * factorial (n - 1)
+                    </script></code></pre>
+                </section>
+
+                <section data-auto-animate>
+                    <pre data-id="canonical-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a) => a -> a
+factorial n | n <= 1    = 1
+            | otherwise = n * factorial (n - 1)
+                    </script></code></pre>
+
+                    <pre data-id="haskell-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a) => a -> a
+factorial n =
+  let factorial' n' = if n <= 1
+                        then 1
+                        else n' * factorial' (n' - 1)
+   in factorial' n
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Intentionally written using conditional</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section data-auto-animate>
+                    <pre data-id="haskell-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a) => a -> a
+factorial n =
+  let factorial' n' = if n <= 1
+                        then 1
+                        else n' * factorial' (n' - 1)
+   in factorial' n
+                    </script></code></pre>
+
+                    <pre data-id="sugared-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a, Typeable a) => Exp a -> Exp a
+factorial n =
+  letfn (\factorial' n' -> cond (n' <= 1)
+                             1
+                             (n' * factorial' (n' - 1)))
+      (\factorial' -> factorial' n)
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Instead of recursively calling factorial directly, the function is bound to a binding
+                                and then used in a let body</li>
+                            <li>If you squint a little, resembles the original program</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section data-auto-animate>
+                    <!-- <h2>The idea</h2> -->
+
+                    <pre data-id="sugared-example"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a, Typeable a) => Exp a -> Exp a
+factorial n =
+  letfn (\factorial' n' -> cond (n' <= 1)
+                             1
+                             (n' * factorial' (n' - 1)))
+      (\factorial' -> factorial' n)
+                    </script></code></pre>
+
+                    <pre><code style="overflow-x: hidden;" data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+factorial :: (Num a, Ord a, Typeable a) => Exp a -> Exp a
+factorial n =
+  Let factorial' (Lambda n'
+        (IfThenElse (Apply (Builtin BuiltinLte)
+                           (Pair (Var n') (Const 1)))
+            (Const 1)
+          (Apply (Builtin BuiltinMul)
+                 (Pair (Var n')
+                       (Apply (Var factorial')
+                              (Apply (Builtin BuiltinAdd)
+                                     (Pair (Var n')
+                                           (Const (-1)))))))))
+    (Apply (Var factorial') n)
+  where
+    factorial' = Ident "factorial"
+    n'         = Ident "n"
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Abstract syntax</h3>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+data Exp a where
+  Const :: a -> Exp a
+  Var   :: Ident t -> Exp t
+  Pair  :: Exp a -> Exp b -> Exp (a, b)
+  ...
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Already saw a glimpse in last slide</li>
+                            <li>Tree-like structure describing program</li>
+                            <li>Details on semantics not important</li>
+                            <li>Only important not to write by hand</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Smart constructors</h3>
+
+                    <ul>
+                        <li>Construct the AST</li>
+                        <li>Forms the user-facing language</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <!-- <h3>Smart constructors</h3> -->
+
+                    <!-- TODO: Can we skip this and still talk about the consequences of 2 and 3? -->
+                    <!-- TODO: Only explain pattern synonyms or add an example -->
+                    <!-- TODO: Can expand on this if there is time left -->
+
+                    <h3>Can be implemented in terms of</h3>
+
+                    <ul>
+                        <li>Regular free functions</li>
+                        <li>Existing type classes (e.g. <tt class="hljs-type">Num</tt>)</li>
+                        <li>Pattern synonyms</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>I'll distinguish between</li>
+                            <li>Distinction between free functions and type class implementation because you can't
+                                control the latter</li>
+                            <li>Want to capture call stacks, need to be able to use HasCallStack</li>
+                            <li>Can't add HasCallStack to e.g. Num type class</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Annotations</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Quick what are annotations</li>
+                            <li>Store metadata on an AST node</li>
+                            <li>Being extensible is a plus</li>
+                            <li>Most important part is that any changes made shouldn't require existing embedded
+                                programs to
+                                be changed</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Goals</h3>
+
+                    <ul>
+                        <li>Annotations store metadata for an AST node</li>
+                        <li>Should be easily extensible</li>
+                        <li>Adding them shouldn't change the user-facing language</li>
+                    </ul>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Storing annotations</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Trees that grow paper explored in more depth</li>
+                            <li>More alternatives in thesis itself</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Multiple appraoches possible</li>
+                        <li>The Trees that Grow paper explores this in more detail</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell">
+data Ann = Ann { ... }
+
+data Exp a where
+  Const :: <strong>Ann</strong> -> a -> Exp a
+  Var   :: <strong>Ann</strong> -> Ident t -> Exp t
+  Pair  :: <strong>Ann</strong> -> Exp a -> Exp b -> Exp (a, b)
+  ...
+                    </code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Define new data type for annotation data</li>
+                            <li>Add a field for this to each of the AST data type's constructors</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+mkAnn :: Ann
+mkAnn = Ann { ... }
+
+constant :: a -> Exp a
+constant = Const mkAnn
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Creating these annotations is simple</li>
+                            <li>Create new function to make fresh annotations</li>
+                            <li>Call that function from every smart constructor</li>
+                            <li>That way no user code using these needs to change</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Annotating ASTs</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Now that the AST contains annotations</li>
+                            <li>There needs to be a way to annotate parts of a program</li>
+                            <li>Usable from user code</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+class HasAnnotations a where
+  modifyAnn :: (Ann -> Ann) -> a -> a
+  getAnn    :: a -> Maybe Ann
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul></ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+instance HasAnnotations (Exp a) where
+  modifyAnn f (Const ann x)   = Const (f ann) x
+  modifyAnn f (Var ann ident) = Var (f ann) ident
+  ...
+
+instance HasAnnotations r => HasAnnotations (a -> r) where
+  modifyAnn f f' x = modifyAnn f (f' x)
+  getAnn _ = Nothing
+                    </script></code></pre>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Annotating AST subtrees</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Instead of annotating single nodes, would be useful to be able to affect everything
+                                under a node</li>
+                            <li>Affects subprogram</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <p>
+                        <strong>Rewriting in-place</strong></br>
+                        Bottom-to-top modification order
+                    </p>
+
+                    <p>
+                        <strong>Deferred modification</strong></br>
+                        Top-to-bottom modification order<br>
+                        Doesn't rewrite every term
+                    </p>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Not rewriting every term leaves keeps sharing in tact</li>
+                            <li>Touch more on later</li>
+                            <li>Most deeply embedded languages use this sharing information to move shared parts that
+                                occur multiple times in AST to let-bindings</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+data Exp a where
+  AnnSubtree :: Ann -> Exp a -> Exp a
+  ...
+
+class TraverseAnnotations a where
+  annotateSubtree :: Ann -> a -> a
+                    </script></code></pre>
+                </section>
+
+                <section>
+                    <pre style="width: 100%"><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+instance TraverseAnnotations (Exp t) where
+  annotateSubtree ann e = AnnSubtree ann e
+
+instance TraverseAnnotations r => TraverseAnnotations (a -> r) where
+  annotateSubtree ann f' x = annotateSubtree ann (f' x)
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Doesn't modify AST directly</li>
+                            <li>Simply wraps the AST inside of another constructor</li>
+                            <li>Actual work is done later</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Using annotations</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Now that we have an abstract idea of how we can add annotations to a language and how to
+                                interact with the language's annotations</li>
+                            <li>Now get to the main focus of this thesis</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Recover source locations, annotate the AST with it</li>
+                        <li>Manually influence the compiler's optimizer</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Quick recap</li>
+                            <li>Main goal</li>
+                            <li>Use the annotation system as a foundation for other uses</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Source mapping</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Main goal</li>
+                            <li>Want to be able to map parts of the AST back to original code</li>
+                            <li>Using this also becomes possible to map compiled program back</li>
+                            <li>With this information it will be possible to build better user experiences:
+                                <ul>
+                                    <li>diagnostics</li>
+                                    <li>profiling</li>
+                                    <li>debugging</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Main goal of this thesis</li>
+                        <li>Map parts of the AST back to the original source code</li>
+                        <li>Useful for diagnnostics, profiling, debugging</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>Three scenarios</h3>
+
+                    <table>
+                        <tbody>
+                            <tr>
+                                <td><strong>Regular free functions</strong></td>
+                                <td>GHC Call Stacks</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Existing type classes</strong></td>
+                                <td>RTS Execution Stacks</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Pattern synonyms</strong></td>
+                                <td>GHC Call Stacks<br>plus some trickery</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>These are the different smart constructor types metnioned earlier</li>
+                            <li>Need to be treated separately</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+data Ann = Ann { locations :: HashSet CallStack, ... }
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Before looking at how this works, need to add call stacks to the annotation type</li>
+                            <li>GHC Call Stacks for base, so store call stacks in annotations</li>
+                            <li>Storing entire call stacks allows for more context</li>
+                            <li>Sharing is possible because stored as is</li>
+                            <li>Why set of call stacks: after optimizations/merging, may be disjoint</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Source mapping</h2>
+                    <h4 style="margin-top: -0.5em">GHC Call Stacks</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Main appraoch</li>
+                            <li>Everything else is adopted to this format</li>
+                            <li>Want to freeze the call stack in smart constructor</li>
+                            <li>Then capture it in mkAnn</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>HasCallStack woes</h3>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+main :: HasCallStack => IO ()
+main = foo
+
+foo :: IO () -- No HasCallStack
+foo = bar
+
+bar :: HasCallStack => IO ()
+bar = print callStack
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Want to capture call stacks with HasCallStack</li>
+                            <li>But call stacks are lost when functions do not have the constraint</li>
+                            <li>main calls foo calls bar, but foo doesn't have constraint</li>
+                            <li>So call stack is cut off and only shows the caller of foo</li>
+                            <li>No compile time way to detect this</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Implicit parameters to the rescue</h3>
+
+                    <ul>
+                        <li>Defined in a separate module</li>
+                        <li><tt class="hljs-type">OpaqueType</tt>'s constructor is not exported</li>
+                        <li><tt class="hljs-title">sourceMap</tt> is the only way to satisfy <tt
+                                class="hljs-type">SourceMapped</tt></li>
+                    </ul>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+data OpaqueType = NotExported
+type SourceMapped =
+  (?requiresSourceMapping :: OpaqueType, HasCallStack)
+
+-- Throws an error if the caller did not have HasCallStack
+sourceMap :: HasCallStack => (SourceMapped => a) -> a
+sourceMap a = ...
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Novel technique to enforce the use of call stacks</li>
+                            <li>The solution is to create a new constraint that forces adding HasCallStack</li>
+                            <li>SourceMapped can only be satisfied by sourceMap</li>
+                            <li>sourceMap freezes the caller's call stack and evaluates term with that</li>
+                            <li>sourceMap errors out if the caller does not have HasCallStack</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell">
+main :: IO ()
+main = foo
+
+foo :: IO ()
+foo = bar -- Compilation error: Unbound implicit parameter
+
+<strong>foo'</strong> :: IO ()
+<strong>foo'</strong> = sourceMap bar -- Runtime error: No HasCallStack
+
+<strong>foo''</strong> :: HasCallStack => IO ()
+<strong>foo''</strong> = sourceMap bar -- Works!
+
+bar :: <strong>SourceMapped</strong> => IO ()
+bar = print callStack
+                    </code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Applying this idea to the example from two slides ago</li>
+                            <li>Not having sourceMap gives compile error</li>
+                            <li>Compiles with sourceMap, but runtime error without HasCallStack</li>
+                            <li>foo'' prints the function's caller and only the function's caller</li>
+                            <li>With more intermediate layers foo'' would still only print the function's caller</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <p>Now to combine everything</p>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Want to use this sourceMap mechanism to capture frozen call stacks</li>
+                            <li>Store those call stacks in the annotations</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell">
+mkAnn :: <strong>SourceMapped</strong> => Ann
+mkAnn = Ann { locations = capture ?callStack, ... }
+  where
+    capture = ...
+
+constant :: <strong>HasCallStack</strong> => a -> Exp a
+constant = sourceMap $ Const mkAnn
+                    </code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>mkAnn uses the SourceMapped constraint to enforce caller has set up source mapping</li>
+                            <li>The constant smart constructor receives call stacks through HasCallStack</li>
+                            <li>And captures them using sourceMap</li>
+                            <li>mkAnn uses this new capture function to store the frozen call in a set</li>
+                            <li>Set can be empty if empty call stack is frozen</li>
+                            <li>There are a couple gotcha's when around implicit parameters and thus sourceMap
+                                especially with nested smart constructors</li>
+                            <li>Can't go into details, read the full thesis if interested</li>
+                            <li>With these changes, the AST now contains source information for nodes created this way
+                            </li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Source mapping</h2>
+                    <h4 style="margin-top: -0.5em">GHC Call Stacks part two: Pattern Synonyms</h4>
+
+                    <!-- TODO: Maybe skip? -->
+                    <!-- TODO: Or simply mention that when patterns are defined as simple aliases, you need to take nesting depth into account -->
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Some considerations when using pattern synonyms</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Important bits</h3>
+
+                    <ul>
+                        <li>Pattern synonyms can be simple aliases</li>
+                        <li>Or have explicit expression (construction) and pattern (destructure) parts</li>
+                        <li>Or somewhere inbetween</li>
+                        <li style="margin-top: 2rem">They desugar to function calls</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Can already guess where this is going</li>
+                            <li>Since they desugar to function calls, can use HasCallStack</li>
+                            <li>But since they can be aliases, more layers would need to be stripped off in sourceMap to
+                                get to the useful part</li>
+                            <li>And aliases also need HasCallStack</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+pattern T2 :: HasCallStack => Exp a -> Exp b -> Exp (a, b)
+pattern T2 x y <- (sourceMapPattern 0 unliftT2 -> (x, y))
+  where T2 x y = sourceMapPattern 0 $ Pair mkAnn x y
+
+unliftT2 :: SourceMapped => Exp (a, b) -> (Exp a, Exp b)
+unliftT2 p = (PrjL mkAnn p, PrjR mkAnn p)
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Lots of code</li>
+                            <li>Pattern synonym either creates an embedded pair</li>
+                            <li>or lets you destructure the embedded pair to its values using projectiosn</li>
+                            <li>Actual code is not too important, but pay attention to the sourceMap</li>
+                            <li>Don't show sourceMapPattern definition, not needed</li>
+                            <li>Maybe mention that call stacks can be lost when nesting depth is too low</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Source mapping</h2>
+                    <h4 style="margin-top: -0.5em">RTS exeuction stacks</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Runtime stack traces</li>
+                            <li>Would be useful for functions that cannot have HasCallStack added to them, example Num
+                                implementation</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>The idea</h3>
+
+                    <ol>
+                        <li>Capture runtime execution stack trace</li>
+                        <li>Filter out everything but the smart constructor call</li>
+                        <li>Convert to GHC Call Stacks</li>
+                        <li>Use <tt class="hljs-title">sourceMap</tt> as normal</li>
+                    </ol>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Requires GHC to be compiled with special off-by-default flag</li>
+                            <li>Problem is that this doesn't actually work</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>The problem</h3>
+
+                    <ul>
+                        <li>Too much noise</li>
+                        <li>Contains holes</li>
+                        <li>Obscure</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>RTS Execution Stacks were only meant as last resort backtraces for crashes</li>
+                            <li>They lead back into the RTS, too much noise</li>
+                            <li>Optimizations remove useful entries from the execution stacks</li>
+                            <li>Unlikely to be enabled, needs both compiler and project configuration</li>
+                            <li>Data is unusable for this purpose at the moment</li>
+                            <li>With more work on GHC however, could be very interesting</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+            <section>
+                <section>
+                    <h2>Source mapping</h2>
+                    <h4 style="margin-top: -0.5em">Explicit context information</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Sometimes it may be useful to explicitly give sections of the program names</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>The problem</h3>
+
+                    <ul>
+                        <li>Source mapping information may be missing</li>
+                        <li>Or the captured function names may be too vague</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Also useful for cases where automatic source mapping doesn't work</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <p>Recall the subtree annotations from earlier.</p>
+
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell"><script type="text/template">
+context :: (HasCallStack, TraverseAnnotations a)
+        => String -> a -> a
+context label =
+  annotateSubtree $ Ann { locations = modifiedCallStack ... }
+  where
+    modifiedCallStack = ...
+                    </script></code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Decorator</li>
+                            <li>Works on entire underlying subtree of the program</li>
+                            <li>Adds the current call stack just like the smart constructors would</li>
+                            <li>But the function name is set to the label</li>
+                            <li>Allows giving explicit context information to a region of the program</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <pre><code data-trim data-noescape data-line-numbers class="no-numbers haskell">
+factorial :: (Num a, Ord a, Typeable a) => Exp a -> Exp a
+factorial n = <strong>context "factorial" $</strong>
+  letfn (\factorial' n' -> cond (n' <= 1)
+                             1
+                             (n' * factorial' (n' - 1)))
+      (\factorial' -> factorial' n)
+                    </code></pre>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Same example from earlier</li>
+                            <li>Now with an explicit name</li>
+                            <li>Call stack will be merged into the existing call stack set when the deferred subtree
+                                annotations are applied</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Optimization flags</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>While annotating the AST with source mapping information was this goal's main thesis
+                            </li>
+                            <li>Finding other ways to build upon the annotation system as a foundation</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>The idea</h3>
+
+                    <ul>
+                        <li>Superoptimization is slow</li>
+                        <li>Compilers lack domain knowledge</li>
+                        <li>Have a way to influence the compiler's decisions</li>
+                        <li>Information can be stored as annotations</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Compilers lack domain knowledge to make informed decisions</li>
+                            <li>Compilers lack domain knowledge to make informed decisions</li>
+                            <li>Programmers can manually nudge the compiler in the right direction</li>
+                            <li>Can be applied using decorators</li>
+                            <li>The information can be stored in the existing annotations</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>May be applied to</h3>
+
+                    <ul>
+                        <li>A single expression</li>
+                        <li>An entire subtree or subprogram</li>
+                        <li>An entire compilation unit</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Optimization flags may be applied to</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Applicable optimizations</h3>
+
+                    <ul>
+                        <li>Forcing inlining</li>
+                        <li>Loop unrolling</li>
+                        <li>Unsafe floating point optimizations (<tt>-ffast-math</tt>)</li>
+                        <li>Target architecture configuration</li>
+                        <li>And many more...</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Won't go into too much detail here, thesis explains everything in depth</li>
+                            <li>Forcing inlining recomputes terms to trade more computational work for less memory uasge
+                            <li>Also interacts with some other optimizations I'll get to later</li>
+                            <li>Applies to a single expression</li>
+                            <li>Loop unrolling common optimization that repeats loop body multiple times to reduce
+                                amount of branching</li>
+                            <li>Can improve performance because less branching = better superscaler pipline usage and
+                                easier to vectorize</li>
+                            <li>Can also hurt performance because more code needs to be generated resulting in
+                                instruction cache misses</li>
+                            <li>Applies to a single expression, won't do anything for unapplicable expressions, compiler
+                                warning possible</li>
+                            <li>Unsafe math optimizatons make things faster but change the program's semantics and allow
+                                illegal optimizations</li>
+                            <li>Can end up breaking things, example later</li>
+                            <li>Applies to entire subprogram</li>
+                            <li>System is also interesting to be able to configure individual compile units or kernels
+                                for different target architectures or cmopiler settings</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Case study</h2>
+                    <h4 style="margin-top: -0.5em">Accelerate</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Now to put the theory to the test</li>
+                            <li>Implemented the annotation based source mapping and optimization system in a real world,
+                                complex language</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Accelerate</h3>
+
+                    <ul>
+                        <li>Deeply embedded data-parallel array language</li>
+                        <li>Multiple backends (CPU, GPU, others...)</li>
+                        <li>Looks similar to regular Haskell array programs</li>
+                        <li>Much faster than regular Haskell array programs</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Write embedded programs to work on large arrays of data</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>What makes Accelerate interesting</h3>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>In the context of implementing the annotation system</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Multiple expression types</h3>
+
+                    <ul>
+                        <li>Parallel collective array operations</li>
+                        <li>Scalar expressions</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Accelerate programs can be logically subdivided into</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Multiple AST types</h3>
+
+                    <ul>
+                        <li>Higher-order abstract syntax with 'inline' terms</li>
+                        <li>First-order abstract syntax with let-bindings</li>
+                        <li>Multiple variations on the latter</li>
+                        <li>Backend-specific representations</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Higher-order abstract syntax doesn't use explicit bindings</li>
+                            <li>First-order abstract syntax does</li>
+                            <li>Bunch of different parameterized AST types similar to the second one</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>Multiple backends</h3>
+
+                    <ul>
+                        <li>Interpreter</li>
+                        <li>LLVM backend with multiple targets:
+                            <ul>
+                                <li>Highly vectorized CPU backend</li>
+                                <li>NVIDIA GPU backend through CUDA/PTX</li>
+                            </ul>
+                        </li>
+                        <li style="margin-top: 2rem">Open ended, possible to
+                            implement other backends without changing
+                            Accelerate itself</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>(relevant parts of)<br>the compilation pipeline</h3>
+
+                    <ul>
+                        <li>Sharing recovery</li>
+                        <li>Simplification</li>
+                        <li>Array fusion</li>
+                        <li>Code generation</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Loosely, compiling an Accelerate program runs through the following steps</li>
+                            <li>Only named the steps where something interesting had to be done for annotatiosn</li>
+                            <li>Focus on some parts of the compilation pipeline</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Compiling Accelerate</h2>
+                    <h4 style="margin-top: -0.5em">Sharing recovery</h4>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>First part of the compilation pipeline</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section data-auto-animate>
+                    <ul>
+                        <li>Finds shared parts of the AST based on <em>stable names</em></li>
+                        <li>Moves those parts to let-bindings</li>
+                        <li data-id="new-step"><strong data-id="label">New:</strong> Applies subtree annotations from
+                            top to bottom
+
+                            <ul data-id="steps">
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Details on how how exactly it works is not importatn</li>
+                            <li>But stable names are based on bindings in the origian lcode</li>
+                            <li>This is the second reason why annotating subtrees can't work in place</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section data-auto-animate>
+                    <ul>
+                        <li>Finds shared parts of the AST based on <em>stable names</em></li>
+                        <li>Moves those parts to let-bindings</li>
+                        <li data-id="new-step"><strong data-id="label">New:</strong> Applies subtree annotations from
+                            top to bottom
+
+                            <ul data-id="steps">
+                                <li>Implicit parameters keep track of the current subtree annotation state</li>
+                                <li>These subtree annotations are merged with every produced AST node</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Compiling Accelerate</h2>
+                    <h4 style="margin-top: -0.5em">Simplification</h4>
+                </section>
+
+                <section data-auto-animate>
+                    <ul>
+                        <li>Rewrite rules for common simplifications</li>
+                        <li>Constant propagation</li>
+                        <li data-id="new-step"><strong data-id="label">New:</strong> Annotations may need to be merged
+
+                            <ul data-id="steps">
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Actual optimizations aren't too importatn</li>
+                            <li>But the simplification process creates new AST nodes out of old ones</li>
+                            <li>The annotations stored in nodes may need to be merged</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section data-auto-animate>
+                    <ul>
+                        <li>Rewrite rules for common simplifications</li>
+                        <li>Constant propagation</li>
+                        <li data-id="new-step"><strong data-id="label">New:</strong> Annotations may need to be merged
+
+                            <ul data-id="steps">
+                                <li>Multiple AST nodes may be merged into one</li>
+                                <li>Annotations are joined</li>
+                                <li>New annotation contains the union of the call stack sets</li>
+                                <li>Actual merging of call stacks still happens only when they are used</li>
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Actual optimizations aren't too important</li>
+                            <li>But the simplification process creates new AST nodes out of old ones</li>
+                            <li>The annotations stored in nodes may need to be merged</li>
+                            <li>Merging involves a sorting algorithm, not too important, read the thesis</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Compiling Accelerate</h2>
+                    <h4 style="margin-top: -0.5em">Array fusion</h4>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Combines operations that produce arrays with other operations</li>
+                        <li>Unless the produced array is used multiple times
+                        </li>
+                        <li>Avoids expensive memory operations and multiple sequential loops</li>
+                        <li><strong>New:</strong> Forcing inlining may allow for more fusion</li>
+                        <li><strong>New:</strong> Handling of conflicting annotations</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Accelerate's most important optimization</li>
+                            <li>Two important interactions with annotations</li>
+                            <li>First is allowing more array fusion</li>
+                            <li>Can help if a trivial computation is used as part of two other array computations in a
+                                diamond pattern</li>
+                            <li>There's a detailed example of this in the thesis</li>
+                            <li>A new issue is fusing operations with conflicting annotatiosn</li>
+                            <li>Right now the join is taken, alternatives include compiler errors or only using the
+                                first one and showing a warning</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <!-- TODO: Maybe skip the example? -->
+                <!-- <section>
+                <figure>
+                    <img class="r-frame" style="background: #fefefe" src="assets/sharing-fusion-example.svg">
+                </figure>
+
+                <aside class="notes">
+                    <ul>
+                        <li>Maybe skip example?</li>
+                    </ul>
+                </aside>
+                </section> -->
+
+                <!-- TODO: Talk about the different strategies for conflicting annotations? -->
+            </section>
+
+            <section>
+                <section>
+                    <h2>Compiling Accelerate</h2>
+                    <h4 style="margin-top: -0.5em">Code generation</h4>
+                </section>
+
+                <!-- <section data-auto-animate>
+                                    <ul>
+                                        <li>Fused array operations are compiled into <em>kernels</em></li>
+                                        <li>Scalar expressions are embedded in those kernels</li>
+                                        <li>The backend may also evaluate terms directly</li>
+                                        <li data-id="new-step"><strong data-id="label">New:</strong> The compiler can access annotation
+                                            data
+
+                                            <ul data-id="steps">
+                                            </ul>
+                                        </li>
+                                    </ul>
+
+                                    <aside class="notes">
+                                        <ul>
+                                            <li>Array-level conditionals are evaluated directly</li>
+                                        </ul>
+                                    </aside>
+                                </section> -->
+
+                <section data-auto-animate>
+                    <ul>
+                        <li>Fused array operations are compiled into <em>kernels</em></li>
+                        <li>Scalar expressions are embedded in those kernels</li>
+                        <li>The backend may also evaluate terms directly</li>
+                        <li data-id="new-step"><strong data-id="label">New:</strong> The compiler can access annotation
+                            data
+
+                            <ul data-id="steps">
+                                <li>For the current expression</li>
+                                <li>Using implicit parameters</li>
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Array-level conditionals are evaluated directly</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>LLVM backend changes</h3>
+
+                    <ul>
+                        <li>Profiler instrumentation</li>
+                        <li>Debug symbols</li>
+                        <li>Optimizations</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Frame profiler</li>
+                            <li>LLVM lets you add metadata to a program to generate debug symbols</li>
+                            <li>Won't cover debug symbols in detail, check thesis</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Frame profiling</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>One of the uses for source locations is instrumentation for profielrs</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Intended for profiling frames in video games</li>
+                        <li>Can also be used for profiling other repetitive tasks</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <p>
+                        Accelerate's LLVM backend already supports the Tracy frame profiler
+                    </p>
+                </section>
+
+                <section>
+                    <h3>The problem</h3>
+
+                    <ul>
+                        <li>Indecipherable kernel names</li>
+                        <li>Difficult to tell kernels apparent in non-trival programs</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>The solution</h3>
+
+                    <ul>
+                        <li>Source locations!</li>
+                        <li>The implicit parameters already carry the required information</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <img src="assets/tracy-lulesh-annotated-alt.png">
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Source locations displayed</li>
+                            <li>Snippet of the correct location shown on hover</li>
+                            <li>calcForceForNodes was explicitly added to a kernel, easily identifyable</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Optimizations</h2>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Won't go into detail here, thesis contains tons of that</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Forcing inlining</li>
+                        <li>Loop unrolling</li>
+                        <li>Unsafe floating point optimizations (<tt>-ffast-math</tt>)</li>
+                        <li>CUDA kernel register limits</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Will discuss these in the results section</li>
+                            <li>LLVM can also perform many code optimizations through metadata, however doesn't
+                                currently work</li>
+                            <li>Loop unrolling is not granular</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Results</h2>
+                </section>
+
+                <section>
+                    <h3>Two examples</h3>
+
+                    <ul>
+                        <li>Fixing a compensated summation implementation</li>
+                        <li>Profiling and optimizing a hydrodynamics simulation</li>
+                    </ul>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Compensated summation</h2>
+                </section>
+
+                <section>
+                    <p>
+                        Adds (many) floating point numbers while <em>compensating</em> for floating point rounding
+                        errors
+                    </p>
+                </section>
+
+                <section>
+                    <h3>According to programming languages</h3>
+
+                    With single-precision IEEE-754 floating point numbers.
+
+                    \[\begin{aligned}
+                    1.0 + 2.0^{100} + 1.0 - 2.0^{100} &amp; = 0.0 \\
+                    1.0 + 2.0^{100} - 2.0^{100} + 1.0 &amp; = 1.0 \\
+                    \end{aligned}\]
+                </section>
+
+                <section>
+                    <h3>The problem</h3>
+
+                    <ul>
+                        <li>The algorithms require additions and subtractions in a specific order</li>
+                        <li>Accelerate uses unsafe floating point optimizations that reorder operations</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>The workaround</h3>
+
+                    <ul>
+                        <li>Directly import the non-<tt>ffast-math</tt> versions of the addition and subtraction
+                            intrinsics</li>
+                        <li>Use the FFI to call those in place of the regular operators</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>The solution</h3>
+
+                    <ul>
+                        <li>Implement the algorithms like any ordinary Accelerate program</li>
+                        <li>Wrap the implementation in <tt class="hljs-title">withoutFastMath</tt></li>
+                    </ul>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>LULESH</h2>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Stripped down hydrodynamics simulation</li>
+                        <li>Details are not important</li>
+                        <li>Complex enough to benefit from the new tools</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>The new profiling and optimization tools can be used to optimize the program</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>The idea</h3>
+
+                    <ul>
+                        <li>Use the new profiling tools to find hotspots</li>
+                        <li>Use the new optimization flags on those hot loops</li>
+                        <li>Hopefully, make it run faster</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <img src="assets/tracy-lulesh-hotspots.png">
+
+                    <aside class="notes">
+                        <ul>
+                            <li>66% of the time is spent in one kernel</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>One kernel ran for 66% of the time</h3>
+
+                    <p>Which makes it a good candidate for experimenting with loop unrolling...</p>
+                </section>
+
+                <section>
+                    <p>...and the average runtime on the CPU backend with a 12-core 24-thread Ryzen 9 5900x went up from
+                        an <strong>8.65</strong> seconds average to a <strong>9.60</strong> second average after
+                        unrolling eight times.</p>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Standard deviations are 0.12 seconds and 0.07 seconds</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <h3>What happeend?</h3>
+
+                    <p>According to a one minute run under Cachegrind:</p>
+
+                    <ul>
+                        <li>14 times higher L1 instruction cache miss rate</li>
+                        <li>7 times higher LL instruction cache miss rate</li>
+                        <li>The first 33% of the runtime was shared</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>On the other hand</h3>
+
+                    <p>Under the GPU backend with an RTX 2080 SUPER the program became (statistically) significantly
+                        faster:</p>
+
+                    <ul>
+                        <li>Average runtimes decreased from <strong>3.13</strong> seconds to <strong>3.07</strong>
+                            seconds with standard deviations of 0.04 seconds in both cases</li>
+                        <li>Only an 1.8% speedup</li>
+                        <li>Still free performance</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>Only tested eight times unrolling for both backends</li>
+                            <li>Accelerate's compiler got too slow to be a realistic use case with higher unrollign
+                                counts</li>
+                        </ul>
+                    </aside>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h3>Summary</h3>
+
+                    <ul>
+                        <li>The new annotation-based tools enable new profiling-driving optimizing workflows</li>
+                        <li>These optimizations are highly dependent on the situation</li>
+                    </ul>
+
+                    <aside class="notes">
+                        <ul>
+                            <li>This also brings us to the main point</li>
+                            <li>Whereas the workflow used to be more drive by trial and error</li>
+                        </ul>
+                    </aside>
+                </section>
+
+                <section>
+                    <p>But more importantly, the annotation system serves as a foundation for new areas of exploration.
+                    </p>
+                </section>
+            </section>
+
+            <section>
+                <h2>Future work</h2>
+
+                <ul>
+                    <li>Expression-level debugging and profiling</li>
+                    <li>Granular loop optimizations for fused, multidimensional, and sequential loops</li>
+                    <li>Compiler diagnostics for deeply embedded languages</li>
+                    <li>Portable compiled programs embedded in compiled host binaries</li>
+                </ul>
+
+                <aside class="notes">
+                    <ul>
+                        <li>Expression level data is already there, unused</li>
+                        <li>Now get to the main focus of this thesis</li>
+                    </ul>
+                </aside>
+            </section>
+        </div>
+    </div>
+
+    <script src="dist/reveal.js"></script>
+    <script src="plugin/notes/notes.js"></script>
+    <script src="plugin/markdown/markdown.js"></script>
+    <script src="plugin/math/math.js"></script>
+    <script src="plugin/highlight/highlight.js"></script>
+    <script>
+        // More info about initialization & config:
+        // - https://revealjs.com/initialization/
+        // - https://revealjs.com/config/
+        Reveal.initialize({
+            hash: true,
+            controls: false,
+            // slideNumber: 'c/t',
+
+            // Learn about plugins: https://revealjs.com/plugins/
+            plugins: [RevealMarkdown, RevealHighlight, RevealNotes, RevealMath.KaTeX],
+        });
+    </script>
+
+    <!-- Speaker notes -->
+    <script src="socket.io/socket.io.js"></script>
+    <script src="node_modules/reveal-notes-server/client.js"></script>
+</body>
+
+</html>
