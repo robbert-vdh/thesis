@@ -26,7 +26,7 @@ Abstract:
 > language are evaluated.
 
 [Full PDF](./annotating-deeply-embedded-languages.pdf)  
-[Thesis defense presentation](https://github.com/robbert-vdh/thesis/blob/master/thesis-defense/index.html), presented by @tmcdonell at the [Haskell Implementor's Workshop 2022](https://youtu.be/2KNkl7W8Rok)
+[Thesis defense presentation](https://htmlpreview.github.io/?https://github.com/robbert-vdh/thesis/blob/master/thesis-defense/index.html), presented by @tmcdonell at the [Haskell Implementor's Workshop 2022](https://youtu.be/2KNkl7W8Rok)
 
 <sup id="deeply-embedded-language">
   *An embedded language is a programming language whose programs are written
